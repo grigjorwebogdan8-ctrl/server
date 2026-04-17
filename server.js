@@ -6,9 +6,12 @@ const wss = new WebSocket.Server({ port: PORT }, () => {
 });
 
 // Хранилище игроков
-let players = {}; 
-// players[userId] = { id, username, avatar, lastSeen }
+let players = {};
 
+// Хранилище ставок текущего раунда
+let roundBets = [];
+
+// Универсальная рассылка
 function broadcast(data) {
   const payload = JSON.stringify(data);
   wss.clients.forEach((client) => {
@@ -33,14 +36,23 @@ function startRound() {
   const crashPoint = generateCrashPoint();
   console.log("ROUND STARTED. Crash =", crashPoint.toFixed(2));
 
+  // отправляем crash_point
   broadcast({
     type: "crash_point",
     value: crashPoint,
     timestamp: Date.now(),
   });
 
+  // очищаем ставки после старта
   setTimeout(() => {
     roundActive = false;
+    roundBets = [];
+
+    broadcast({
+      type: "bets_list",
+      list: [],
+    });
+
     broadcast({ type: "round_end" });
   }, 100);
 }
@@ -77,20 +89,25 @@ wss.on("connection", (ws) => {
           lastSeen: Date.now(),
         };
 
-        broadcast({
-          type: "players",
-          list: Object.values(players),
-        });
-
-        broadcast({
-          type: "bet",
+        // сохраняем ставку
+        const bet = {
+          id: Date.now().toString(),
           userId: data.userId,
           username: data.username,
           avatar: data.avatar || null,
           amount: data.amount,
-          timestamp: Date.now(),
+          status: "playing",
+        };
+
+        roundBets.unshift(bet);
+
+        // рассылаем обновлённый список ставок
+        broadcast({
+          type: "bets_list",
+          list: roundBets,
         });
 
+        // запускаем раунд, если он ещё не идёт
         if (!roundActive) startRound();
       }
 
