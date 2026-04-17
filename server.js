@@ -5,7 +5,10 @@ const wss = new WebSocket.Server({ port: PORT }, () => {
   console.log("WS server started on port", PORT);
 });
 
-// Универсальная функция рассылки
+// Хранилище игроков
+let players = {}; 
+// players[userId] = { id, username, avatar, lastSeen }
+
 function broadcast(data) {
   const payload = JSON.stringify(data);
   wss.clients.forEach((client) => {
@@ -15,65 +18,70 @@ function broadcast(data) {
   });
 }
 
-// === ЛОГИКА КРАША ===
-let roundActive = false;
-let crashPoint = null;
-
 // Генерация краша
 function generateCrashPoint() {
-  // классическая формула crash
   const r = Math.random();
   return Math.max(1.01, 1 / (1 - r));
 }
 
-// Запуск раунда
+let roundActive = false;
+
 function startRound() {
   if (roundActive) return;
-
   roundActive = true;
-  crashPoint = generateCrashPoint();
 
+  const crashPoint = generateCrashPoint();
   console.log("ROUND STARTED. Crash =", crashPoint.toFixed(2));
 
-  // Рассылаем crash_point всем игрокам
   broadcast({
     type: "crash_point",
     value: crashPoint,
     timestamp: Date.now(),
   });
 
-  // Завершаем раунд через 100мс
   setTimeout(() => {
     roundActive = false;
-    crashPoint = null;
-
-    broadcast({
-      type: "round_end",
-    });
-
-    console.log("ROUND ENDED");
+    broadcast({ type: "round_end" });
   }, 100);
 }
 
 wss.on("connection", (ws) => {
   console.log("Client connected");
 
-  // Отправляем реальный онлайн всем
-  broadcast({
-    type: "online",
-    count: wss.clients.size,
-  });
-
   ws.on("message", (msg) => {
     try {
       const data = JSON.parse(msg);
-      console.log("New message:", data);
+
+      // === РЕГИСТРАЦИЯ ИГРОКА ===
+      if (data.type === "register") {
+        players[data.userId] = {
+          id: data.userId,
+          username: data.username,
+          avatar: data.avatar || null,
+          lastSeen: Date.now(),
+        };
+
+        broadcast({
+          type: "players",
+          list: Object.values(players),
+        });
+      }
 
       // === СТАВКА ===
       if (data.type === "bet") {
-        console.log("New bet:", data);
+        // обновляем игрока
+        players[data.userId] = {
+          id: data.userId,
+          username: data.username,
+          avatar: data.avatar || null,
+          lastSeen: Date.now(),
+        };
 
-        // Рассылаем ставку всем
+        broadcast({
+          type: "players",
+          list: Object.values(players),
+        });
+
         broadcast({
           type: "bet",
           userId: data.userId,
@@ -83,10 +91,7 @@ wss.on("connection", (ws) => {
           timestamp: Date.now(),
         });
 
-        // Если это первая ставка → запускаем раунд
-        if (!roundActive) {
-          startRound();
-        }
+        if (!roundActive) startRound();
       }
 
     } catch (e) {
@@ -96,10 +101,5 @@ wss.on("connection", (ws) => {
 
   ws.on("close", () => {
     console.log("Client disconnected");
-
-    broadcast({
-      type: "online",
-      count: wss.clients.size,
-    });
   });
 });
