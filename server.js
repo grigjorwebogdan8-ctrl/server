@@ -11,6 +11,26 @@ const wss = new WebSocket.Server({ noServer: true });
 wss.on("connection", (ws) => {
   console.log("Client connected");
   ws.send("Hello from WS");
+
+  ws.on("message", (msg) => {
+    const data = JSON.parse(msg);
+
+    // === Обработка ставки ===
+    if (data.type === "bet") {
+      console.log("New bet:", data);
+
+      // Рассылка всем игрокам
+      wss.clients.forEach(client => {
+        if (client.readyState === WebSocket.OPEN) {
+          client.send(JSON.stringify({
+            type: "bet_update",
+            user: data.user,
+            amount: data.amount
+          }));
+        }
+      });
+    }
+  });
 });
 
 server.on("upgrade", (req, socket, head) => {
