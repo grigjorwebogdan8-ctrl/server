@@ -15,6 +15,46 @@ function broadcast(data) {
   });
 }
 
+// === ЛОГИКА КРАША ===
+let roundActive = false;
+let crashPoint = null;
+
+// Генерация краша
+function generateCrashPoint() {
+  // классическая формула crash
+  const r = Math.random();
+  return Math.max(1.01, 1 / (1 - r));
+}
+
+// Запуск раунда
+function startRound() {
+  if (roundActive) return;
+
+  roundActive = true;
+  crashPoint = generateCrashPoint();
+
+  console.log("ROUND STARTED. Crash =", crashPoint.toFixed(2));
+
+  // Рассылаем crash_point всем игрокам
+  broadcast({
+    type: "crash_point",
+    value: crashPoint,
+    timestamp: Date.now(),
+  });
+
+  // Завершаем раунд через 100мс
+  setTimeout(() => {
+    roundActive = false;
+    crashPoint = null;
+
+    broadcast({
+      type: "round_end",
+    });
+
+    console.log("ROUND ENDED");
+  }, 100);
+}
+
 wss.on("connection", (ws) => {
   console.log("Client connected");
 
@@ -33,23 +73,20 @@ wss.on("connection", (ws) => {
       if (data.type === "bet") {
         console.log("New bet:", data);
 
+        // Рассылаем ставку всем
         broadcast({
           type: "bet",
           userId: data.userId,
           username: data.username,
-          avatar: data.avatar || null, // аватар игрока
+          avatar: data.avatar || null,
           amount: data.amount,
           timestamp: Date.now(),
         });
-      }
 
-      // === СИНХРОНИЗАЦИЯ КРАША (если понадобится) ===
-      if (data.type === "crash_point") {
-        broadcast({
-          type: "crash_point",
-          value: data.value,
-          timestamp: Date.now(),
-        });
+        // Если это первая ставка → запускаем раунд
+        if (!roundActive) {
+          startRound();
+        }
       }
 
     } catch (e) {
@@ -60,7 +97,6 @@ wss.on("connection", (ws) => {
   ws.on("close", () => {
     console.log("Client disconnected");
 
-    // Обновляем онлайн
     broadcast({
       type: "online",
       count: wss.clients.size,
