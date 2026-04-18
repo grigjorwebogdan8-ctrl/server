@@ -11,6 +11,10 @@ let players = {};
 // Хранилище ставок текущего раунда
 let roundBets = [];
 
+// Текущий множитель
+let currentMultiplier = 1.00;
+let roundInterval;
+
 // Универсальная рассылка
 function broadcast(data) {
   const payload = JSON.stringify(data);
@@ -36,24 +40,37 @@ function startRound() {
   const crashPoint = generateCrashPoint();
   console.log("ROUND STARTED. Crash =", crashPoint.toFixed(2));
 
-  // отправляем crash_point
-  broadcast({
-    type: "crash_point",
-    value: crashPoint,
-    timestamp: Date.now(),
-  });
+  currentMultiplier = 1.00;
 
-  // очищаем ставки после старта
-  setTimeout(() => {
-    roundActive = false;
-    roundBets = [];
+  broadcast({ type: "round_start" });
 
+  roundInterval = setInterval(() => {
+    currentMultiplier += 0.01;
     broadcast({
-      type: "bets_list",
-      list: [],
+      type: "multiplier_update",
+      value: parseFloat(currentMultiplier.toFixed(2))
     });
 
-    broadcast({ type: "round_end" });
+    if (currentMultiplier >= crashPoint) {
+      clearInterval(roundInterval);
+      roundActive = false;
+
+      // Обработка ставок при краше
+      roundBets.forEach(bet => {
+        if (bet.status === "playing") {
+          bet.status = "crashed";
+        }
+      });
+
+      broadcast({
+        type: "bets_list",
+        list: roundBets
+      });
+
+      broadcast({ type: "round_end", crash: true });
+
+      roundBets = [];
+    }
   }, 100);
 }
 
@@ -109,6 +126,19 @@ wss.on("connection", (ws) => {
 
         // запускаем раунд, если он ещё не идёт
         if (!roundActive) startRound();
+      }
+
+      // === CASHOUT ===
+      if (data.type === "cashout") {
+        const bet = roundBets.find(b => b.userId === data.userId && b.status === "playing");
+        if (bet) {
+          bet.status = "cashed_out";
+          bet.amount_won = bet.amount * currentMultiplier;
+          broadcast({
+            type: "bets_list",
+            list: roundBets,
+          });
+        }
       }
 
     } catch (e) {
